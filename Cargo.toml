@@ -3,4 +3,17 @@ name = "yarrs"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+src = "src/lib.rs"
+
+[[bin]]
+name = "yarrs"
+src = "src/main.rs"
+
 [dependencies]
+anyhow = "1.0.96"
+thiserror = "2.0.11"
+tokio = { version = "1", features = ["macros"] }
+
+[dev-dependencies]
+rstest = "0.24.0"
