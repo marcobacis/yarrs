@@ -25,7 +25,7 @@ async fn handle(socket: &mut TcpStream) -> Result<()> {
         }
         let received = String::from_utf8(buffer.to_vec())?;
         if received.contains("PING") {
-            socket.write("+PONG\r\n".as_bytes()).await?;
+            let _ = socket.write("+PONG\r\n".as_bytes()).await?;
         }
     }
     Ok(())

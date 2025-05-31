@@ -1,6 +1,5 @@
 use std::{
-    num::{ParseFloatError, ParseIntError},
-    string::FromUtf8Error,
+    array::TryFromSliceError, num::{ParseFloatError, ParseIntError}, str::Utf8Error, string::FromUtf8Error
 };
 
 use anyhow::anyhow;
@@ -47,5 +46,17 @@ impl From<ParseFloatError> for FrameParsingError {
 impl From<std::io::Error> for FrameParsingError {
     fn from(value: std::io::Error) -> Self {
         FrameParsingError::Other(value.into())
+    }
+}
+
+impl From<TryFromSliceError> for FrameParsingError {
+    fn from(value: TryFromSliceError) -> Self {
+        FrameParsingError::Other(anyhow!(value))
+    }
+}
+
+impl From<Utf8Error> for FrameParsingError {
+    fn from(value: Utf8Error) -> Self {
+        FrameParsingError::Other(anyhow!(value))
     }
 }
