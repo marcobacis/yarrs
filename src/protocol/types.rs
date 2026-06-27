@@ -1,6 +1,8 @@
-
 use std::{
-    collections::{HashMap, HashSet}, hash::Hash, io::{Cursor, Read}, str::{self, FromStr}
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    io::{Cursor, Read},
+    str::{self, FromStr},
 };
 
 use bytes::Bytes;
@@ -11,7 +13,7 @@ use super::{connection::Message, error::FrameParsingError};
 pub enum VerbatimEncoding {
     Text,
     Markdown,
-    Other([u8; 3])
+    Other([u8; 3]),
 }
 
 impl TryFrom<&[u8]> for VerbatimEncoding {
@@ -21,7 +23,7 @@ impl TryFrom<&[u8]> for VerbatimEncoding {
         match value {
             [b't', b'x', b't'] => Ok(VerbatimEncoding::Text),
             [b'm', b'k', b'd'] => Ok(VerbatimEncoding::Markdown),
-            [a,b,c] => Ok(VerbatimEncoding::Other([*a,*b,*c])),
+            [a, b, c] => Ok(VerbatimEncoding::Other([*a, *b, *c])),
             _ => Err("invalid number of characters for verbatim encoding".into()),
         }
     }
@@ -48,21 +50,22 @@ pub enum Frame {
 
 impl Eq for Frame {}
 
-const ARRAY_PREFIX : u8 = b'*';
-const ATTRIBUTE_PREFIX : u8 = b'|';
-const BIGNUMBER_PREFIX : u8 = b'(';
-const BOOLEAN_PREFIX : u8 = b'#';
-const BULK_PREFIX : u8 = b'$';
-const BULKERROR_PREFIX : u8 = b'!';
-const DOUBLE_PREFIX : u8 = b'.';
-const ERROR_PREFIX : u8 = b'-';
-const INTEGER_PREFIX : u8 = b':';
-const MAP_PREFIX : u8 = b'%';
-const NULL_PREFIX : u8 = b'_';
-const PUSH_PREFIX : u8 = b'>';
-const SET_PREFIX : u8 = b'~';
-const SIMPLE_PREFIX : u8 = b'+';
-const VERBATIM_PREFIX : u8 = b'=';
+const ARRAY_PREFIX: u8 = b'*';
+const ATTRIBUTE_PREFIX: u8 = b'|';
+const BIGNUMBER_PREFIX: u8 = b'(';
+const BOOLEAN_PREFIX: u8 = b'#';
+const BULK_PREFIX: u8 = b'$';
+const BULKERROR_PREFIX: u8 = b'!';
+const DOUBLE_PREFIX: u8 = b'.';
+const ERROR_PREFIX: u8 = b'-';
+const INTEGER_PREFIX: u8 = b':';
+const MAP_PREFIX: u8 = b'%';
+const NULL_PREFIX: u8 = b'_';
+const PUSH_PREFIX: u8 = b'>';
+const SET_PREFIX: u8 = b'~';
+const SIMPLE_PREFIX: u8 = b'+';
+const VERBATIM_PREFIX: u8 = b'=';
+const NEWLINE: [u8; 2] = [b'\r', b'\n'];
 
 impl Frame {
     pub fn prefix(&self) -> u8 {
@@ -104,7 +107,7 @@ impl Hash for Frame {
             Frame::Verbatim(encoding, data) => {
                 encoding.hash(state);
                 data.hash(state);
-            },
+            }
             _ => panic!("Invalid frame type to be hashed"),
         }
     }
@@ -141,17 +144,17 @@ impl Message<Frame, FrameParsingError> for Frame {
                 let size = read_from_line::<u32>(buf)?;
                 let data = read_bytes(buf, size as usize)?;
                 Ok(Frame::BulkError(String::from_utf8(data.to_vec())?))
-            },
+            }
             VERBATIM_PREFIX => {
                 let size = read_from_line::<u32>(buf)?;
                 let data = read_bytes(buf, (size + 4) as usize)?;
                 if data[3] != b':' {
                     return Err("Missing ':' character as 4th byte".into());
                 }
-                let encoding : VerbatimEncoding = data[..3].try_into()?;
+                let encoding: VerbatimEncoding = data[..3].try_into()?;
                 let content = str::from_utf8(&data[4..])?.to_owned();
                 Ok(Frame::Verbatim(encoding, content))
-            },
+            }
             MAP_PREFIX => Ok(Frame::Map(read_map(buf)?)),
             ATTRIBUTE_PREFIX => Ok(Frame::Attribute(read_map(buf)?)),
             SET_PREFIX => Ok(Frame::Set(HashSet::from_iter(read_array(buf)?))),
@@ -159,7 +162,7 @@ impl Message<Frame, FrameParsingError> for Frame {
             _ => todo!("Implement error handling"),
         }
     }
-    
+
     fn check(cursor: &mut Cursor<&[u8]>) -> bool {
         // TODO improve length check method
         match Self::parse(cursor) {
@@ -167,6 +170,67 @@ impl Message<Frame, FrameParsingError> for Frame {
             Err(FrameParsingError::Incomplete) => false,
             Err(_) => true,
         }
+    }
+
+    fn serialize(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        match self {
+            Frame::Array(frames) => {
+                serialize_array(&mut buf, ARRAY_PREFIX, frames);
+            }
+            Frame::Attribute(hash_map) => serialize_map(&mut buf, ATTRIBUTE_PREFIX, hash_map),
+            Frame::BigNumber(n) => serialize_simple_string(&mut buf, BIGNUMBER_PREFIX, n),
+            Frame::Boolean(v) => {
+                let value = if *v { "t" } else { "f" };
+                serialize_simple_string(&mut buf, BOOLEAN_PREFIX, value)
+            }
+            Frame::Bulk(bytes) => {
+                buf.push(BULK_PREFIX);
+                buf.extend_from_slice(bytes.len().to_string().as_bytes());
+                buf.extend_from_slice(&NEWLINE);
+                buf.extend_from_slice(bytes);
+                buf.extend_from_slice(&NEWLINE);
+            }
+            Frame::BulkError(s) => {
+                let bytes = s.as_bytes();
+                buf.push(BULKERROR_PREFIX);
+                buf.extend_from_slice(bytes.len().to_string().as_bytes());
+                buf.extend_from_slice(&NEWLINE);
+                buf.extend_from_slice(bytes);
+                buf.extend_from_slice(&NEWLINE);
+            }
+            Frame::Double(n) => {
+                serialize_simple_string(&mut buf, DOUBLE_PREFIX, &format!("{:+}", n))
+            }
+            Frame::Error(s) => serialize_simple_string(&mut buf, ERROR_PREFIX, s),
+            Frame::Integer(n) => {
+                serialize_simple_string(&mut buf, INTEGER_PREFIX, &format!("{:+}", n))
+            }
+            Frame::Map(hash_map) => serialize_map(&mut buf, MAP_PREFIX, hash_map),
+            Frame::Null => {
+                buf.push(NULL_PREFIX);
+                buf.extend_from_slice(&NEWLINE);
+            }
+            Frame::Push(frames) => serialize_array(&mut buf, PUSH_PREFIX, frames),
+            Frame::Set(hash_set) => serialize_set(&mut buf, SET_PREFIX, hash_set),
+            Frame::Simple(s) => serialize_simple_string(&mut buf, SIMPLE_PREFIX, s),
+            Frame::Verbatim(enc, s) => {
+                let bytes = s.as_bytes();
+                let enc = match enc {
+                    VerbatimEncoding::Text => &[b't', b'x', b't'],
+                    VerbatimEncoding::Markdown => &[b'm', b'k', b'd'],
+                    VerbatimEncoding::Other(value) => value,
+                };
+                buf.push(VERBATIM_PREFIX);
+                buf.extend_from_slice(bytes.len().to_string().as_bytes());
+                buf.extend_from_slice(&NEWLINE);
+                buf.extend_from_slice(enc);
+                buf.push(b':');
+                buf.extend_from_slice(bytes);
+                buf.extend_from_slice(&NEWLINE);
+            }
+        }
+        buf
     }
 }
 
@@ -229,7 +293,6 @@ where
     Ok(value)
 }
 
-
 fn read_bytes(buf: &mut Cursor<&[u8]>, size: usize) -> Result<Bytes, FrameParsingError> {
     let start = buf.position() as usize;
     let end = start + size;
@@ -242,13 +305,50 @@ fn read_bytes(buf: &mut Cursor<&[u8]>, size: usize) -> Result<Bytes, FrameParsin
     Ok(data)
 }
 
+fn serialize_simple_string(buf: &mut Vec<u8>, prefix: u8, content: &str) {
+    buf.push(prefix);
+    buf.extend_from_slice(content.as_bytes());
+    buf.extend_from_slice(&NEWLINE);
+}
+
+fn serialize_array(buf: &mut Vec<u8>, prefix: u8, frames: &Vec<Frame>) {
+    buf.push(prefix);
+    buf.extend_from_slice(frames.len().to_string().as_bytes());
+    buf.extend_from_slice(&NEWLINE);
+    for v in frames {
+        buf.extend_from_slice(&v.serialize());
+    }
+}
+
+fn serialize_set(buf: &mut Vec<u8>, prefix: u8, frames: &HashSet<Frame>) {
+    buf.push(prefix);
+    buf.extend_from_slice(frames.len().to_string().as_bytes());
+    buf.extend_from_slice(&NEWLINE);
+    for v in frames {
+        buf.extend_from_slice(&v.serialize());
+    }
+}
+
+fn serialize_map(buf: &mut Vec<u8>, prefix: u8, hash_map: &HashMap<Frame, Frame>) {
+    buf.push(prefix);
+    buf.extend_from_slice(hash_map.len().to_string().as_bytes());
+    buf.extend_from_slice(&NEWLINE);
+    for (k, v) in hash_map {
+        buf.extend_from_slice(&k.serialize());
+        buf.extend_from_slice(&v.serialize());
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
-    use crate::protocol::{connection::Message, types::VerbatimEncoding};
     use super::Frame;
+    use crate::protocol::{connection::Message, types::VerbatimEncoding};
     use rstest::rstest;
-    use std::{collections::{HashMap, HashSet}, io::Cursor};
+    use std::{
+        collections::{HashMap, HashSet},
+        io::Cursor,
+    };
 
     #[rstest]
     #[case("+OK\r\n", Frame::Simple("OK".to_string()))]
@@ -307,7 +407,7 @@ mod tests {
         let mut cursor = Cursor::new(input.as_bytes());
         let enough = Frame::check(&mut cursor);
         assert!(!enough);
-        
+
         cursor.set_position(0);
 
         let result = Frame::parse(&mut cursor);
@@ -329,5 +429,40 @@ mod tests {
         let mut cursor = Cursor::new(input.as_bytes());
         let result = Frame::parse(&mut cursor);
         assert!(matches!(result, Err(FrameParsingError::Other(_))));
+    }
+
+    #[test]
+    fn test_serialize_parse_roundtrip() {
+        let frames = vec![
+            Frame::Simple("OK".into()),
+            Frame::Error("Error".into()),
+            Frame::Integer(123),
+            Frame::Double(123.456),
+            Frame::Bulk("hello".into()),
+            Frame::BulkError("error".into()),
+            Frame::Null,
+            Frame::Array(vec![Frame::Integer(1), Frame::Integer(2)]),
+            Frame::Boolean(true),
+            Frame::Boolean(false),
+            Frame::BigNumber("12345678901234567890".into()),
+            Frame::Verbatim(VerbatimEncoding::Text, "hello".into()),
+            Frame::Map(HashMap::from([(
+                Frame::Simple("k".into()),
+                Frame::Integer(1),
+            )])),
+            Frame::Attribute(HashMap::from([(
+                Frame::Simple("k".into()),
+                Frame::Integer(1),
+            )])),
+            Frame::Set(HashSet::from([Frame::Integer(1), Frame::Integer(2)])),
+            Frame::Push(vec![Frame::Integer(1), Frame::Integer(2)]),
+        ];
+
+        for frame in frames {
+            let serialized = frame.serialize();
+            let mut cursor = Cursor::new(serialized.as_slice());
+            let parsed = Frame::parse(&mut cursor).unwrap();
+            assert_eq!(frame, parsed);
+        }
     }
 }

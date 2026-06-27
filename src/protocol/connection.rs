@@ -8,6 +8,7 @@ use tokio::io::AsyncWriteExt;
 pub trait Message<T, TErr> {
     fn check(cursor: &mut Cursor<&[u8]>) -> bool;
     fn parse(cursor: &mut Cursor<&[u8]>) -> Result<T, TErr>;
+    fn serialize(&self) -> Vec<u8>;
 }
 
 pub struct Connection<T>
@@ -55,6 +56,16 @@ where
                 return Ok(None);
             }
         }
+    }
+
+    pub async fn write<TMessage, TItem, TErr>(&mut self, item: &TMessage) -> Result<(), TErr>
+    where
+        TMessage: Message<TItem, TErr>,
+        TErr: From<std::io::Error>,
+    {
+        let message = item.serialize();
+        self.stream.write_all(&message).await?;
+        Ok(())
     }
 }
 
@@ -158,6 +169,10 @@ mod tests {
             let mut msg = Self { buf: [0u8; N] };
             let _ = std::io::Read::read(cursor, &mut msg.buf)?;
             Ok(msg)
+        }
+
+        fn serialize(&self) -> Vec<u8> {
+            todo!()
         }
     }
 }
