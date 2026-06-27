@@ -7,7 +7,7 @@ use std::{
 
 use bytes::Bytes;
 
-use super::{connection::Message, error::FrameParsingError};
+use crate::{resp::connection::Message, resp::error::FrameParsingError};
 
 #[derive(Debug, PartialEq, Hash)]
 pub enum VerbatimEncoding {
@@ -341,9 +341,10 @@ fn serialize_map(buf: &mut Vec<u8>, prefix: u8, hash_map: &HashMap<Frame, Frame>
 
 #[cfg(test)]
 mod tests {
-
     use super::Frame;
-    use crate::protocol::{connection::Message, types::VerbatimEncoding};
+    use crate::resp::connection::Message;
+    use crate::resp::error::FrameParsingError;
+    use crate::resp::types::VerbatimEncoding;
     use rstest::rstest;
     use std::{
         collections::{HashMap, HashSet},
@@ -402,8 +403,6 @@ mod tests {
     #[case("%2\r\n+first\r\n")]
     #[case("~3\r\n:1\r\n:2\r\n")]
     fn test_parse_incomplete(#[case] input: &str) {
-        use crate::protocol::error::FrameParsingError;
-
         let mut cursor = Cursor::new(input.as_bytes());
         let enough = Frame::check(&mut cursor);
         assert!(!enough);
@@ -424,8 +423,6 @@ mod tests {
     #[case("~-34\r\n")]
     #[case("~a\r\n")]
     fn test_parse_invalid(#[case] input: &str) {
-        use crate::protocol::error::FrameParsingError;
-
         let mut cursor = Cursor::new(input.as_bytes());
         let result = Frame::parse(&mut cursor);
         assert!(matches!(result, Err(FrameParsingError::Other(_))));

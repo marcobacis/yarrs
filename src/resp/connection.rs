@@ -74,7 +74,7 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     use super::Message;
-    use crate::protocol::connection::Connection;
+    use crate::resp::connection::Connection;
 
     #[tokio::test]
     async fn can_create_connection() {

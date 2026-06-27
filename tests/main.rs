@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use redis::{aio::MultiplexedConnection, AsyncConnectionConfig, Value};
-use tokio::net::TcpListener;
+use yarrs::server::{bind, run_listener, Server};
 
 #[tokio::test]
 async fn test_ping() {
@@ -30,17 +30,21 @@ async fn test_echo() {
 }
 
 async fn spawn() -> MultiplexedConnection {
-    let listener = TcpListener::bind("0.0.0.0:0")
-        .await
-        .expect("Couldn't create tcp listener");
-    let addr = listener.local_addr().unwrap().to_string();
+    let mut listener = bind("0.0.0.0".into(), 0).await;
+    let mut server = Server::new("0.0.0.0".into(), listener.local_addr().unwrap().port());
+    let sender = server.sender.clone();
+    let addr = server.info.address();
 
     tokio::spawn(async move {
-        yarrs::run(listener).await.expect("Could not start yarrs");
+        run_listener(&mut listener, sender).await;
+    });
+
+    tokio::spawn(async move {
+        server.run().await;
     });
 
     let client =
-        redis::Client::open(format!("redis://{}/", addr)).expect("Could not create redis client");
+        redis::Client::open(format!("redis://{}/", &addr)).expect("Could not create redis client");
 
     let config = AsyncConnectionConfig::new()
         .set_connection_timeout(Duration::from_secs(1))
