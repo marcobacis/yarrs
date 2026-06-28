@@ -30,7 +30,7 @@ where
         }
     }
 
-    pub async fn read<TItem, TErr>(&mut self) -> Result<Option<TItem>, TErr>
+    pub async fn read<TItem, TErr>(&mut self) -> Result<Option<(TItem, Vec<u8>)>, TErr>
     where
         TItem: Message<TItem, TErr>,
         TErr: From<std::io::Error>,
@@ -40,7 +40,10 @@ where
             if TItem::check(&mut cursor) {
                 cursor.set_position(0);
                 let result = match TItem::parse(&mut cursor) {
-                    Ok(msg) => Ok(Some(msg)),
+                    Ok(msg) => Ok(Some((
+                        msg,
+                        self.buffer[..cursor.position() as usize].to_vec(),
+                    ))),
                     Err(e) => Err(e),
                 };
                 self.buffer.advance(cursor.position() as usize);
@@ -138,11 +141,11 @@ mod tests {
 
     fn assert_msg_is<const N: usize, TErr>(
         expected: [u8; N],
-        result: Result<Option<TestCoso<N>>, TErr>,
+        result: Result<Option<(TestCoso<N>, Vec<u8>)>, TErr>,
     ) {
         assert!(result.is_ok_and(|r| r.is_some_and(|msg| {
             dbg!(&msg);
-            msg.buf == expected
+            msg.0.buf == expected
         })));
     }
 

@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use redis::{aio::MultiplexedConnection, AsyncConnectionConfig, Value};
-use yarrs::server::{bind, run_listener, Server};
+use yarrs::{
+    listener::{bind, run_listener},
+    server::Server,
+};
 
 #[tokio::test]
 async fn test_ping() {
@@ -57,15 +60,3 @@ async fn spawn() -> MultiplexedConnection {
 
     connection
 }
-
-/*
-TEST LIST
-- [X] Simple ping
-- [ ] Ping two times
-- [ ] ECHO (requires parsing?)
-- [ ]
-- [ ]
-- [ ]
-v
-
-*/

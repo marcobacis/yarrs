@@ -1,18 +1,14 @@
 use std::{collections::HashMap, sync::atomic::AtomicU64};
 
 use thiserror::Error;
-use tokio::{
-    net::{TcpListener, TcpStream},
-    select,
-    sync::mpsc,
-};
+use tokio::{select, sync::mpsc};
 
 use crate::{
     messages::{
         ConnectionMessage::{self},
-        Request, ServerMessage,
+        ServerMessage,
     },
-    resp::{connection::Connection, error::FrameParsingError, types::Frame},
+    resp::{error::FrameParsingError, types::Frame},
 };
 
 pub struct Client {
@@ -58,7 +54,7 @@ impl Server {
         Server {
             info: ServerInfo { host, port },
             receiver: recv,
-            sender: sender,
+            sender,
             clients: HashMap::new(),
             client_id: AtomicU64::new(0),
         }
@@ -75,15 +71,23 @@ impl Server {
                                 id: new_id,
                                 sender: sender.clone()
                             };
-                            client.sender.send(ServerMessage::ClientInitialized(new_id)).await;
+                            if let Err(e) = client.sender.send(ServerMessage::ClientInitialized(new_id)).await {
+                                eprintln!("Error sending new client id back to client: {}", e);
+                            }
                             self.clients.insert(new_id, client);
                         },
                         ConnectionMessage::ClientRequest(request) => {
                             let id = request.client_id;
                             if let Some(client)  = self.clients.get(&id) {
                                 match handle_message(&request.frame).await {
-                                    Ok(response) => client.sender.send(ServerMessage::Data(response)).await,
-                                    Err(_) => Ok(()),
+                                    Ok(response) => {
+                                        if let Err(e) = client.sender.send(ServerMessage::Data(response)).await {
+                                            eprintln!("Error sending response to client listener: {e}");
+                                        }
+                                    },
+                                    Err(e) => {
+                                        eprintln!("Error handling message : {}", e);
+                                    },
                                 };
                             }
                         },
@@ -91,64 +95,6 @@ impl Server {
                 }
             }
         }
-    }
-}
-
-pub async fn bind(host: String, port: u16) -> TcpListener {
-    TcpListener::bind(format!("{}:{}", host, port))
-        .await
-        .expect("Couldn't create tcp listener")
-}
-
-pub async fn run_listener(listener: &mut TcpListener, sender: mpsc::Sender<ConnectionMessage>) {
-    loop {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        let sender = sender.clone();
-        tokio::spawn(async move {
-            handle_connection(&mut socket, sender).await;
-        });
-    }
-}
-
-async fn handle_connection(socket: &mut TcpStream, sender: mpsc::Sender<ConnectionMessage>) {
-    let (connection_sender, mut connection_receiver) = mpsc::channel::<ServerMessage>(32);
-
-    if let Err(e) = sender
-        .send(ConnectionMessage::NewClient(connection_sender.clone()))
-        .await
-    {
-        eprintln!("Error sending new client request: {}", e);
-        return;
-    }
-
-    let id = match connection_receiver.recv().await {
-        Some(ServerMessage::ClientInitialized(id)) => id,
-        _ => {
-            eprintln!("Error initializing client");
-            return;
-        }
-    };
-
-    let mut connection = Connection::new(socket);
-    loop {
-        select! {
-            Ok(Some(frame)) = connection.read::<Frame, FrameParsingError>() => {
-                if let Err(e) = sender.send(ConnectionMessage::ClientRequest(Request {
-                    client_id: id,
-                    frame,
-                })).await {
-                    eprintln!("Error sending request: {}", e);
-                    return;
-                }
-            },
-
-            Some(ServerMessage::Data(frame)) = connection_receiver.recv() =>  {
-                if let Err(e) = connection.write(&frame).await {
-                    eprintln!("Error sending request: {}", e);
-                    return;
-                }
-            }
-        };
     }
 }
 
@@ -165,7 +111,7 @@ async fn handle_message(message: &Frame) -> Result<Frame, ServerError> {
     let mut command = Vec::new();
     for elem in elements {
         match elem {
-            Frame::Bulk(s) => command.push(String::from_utf8(s.to_vec()).map_err(|e| {
+            Frame::Bulk(s) => command.push(String::from_utf8(s.to_vec()).map_err(|_| {
                 ServerError::CommandInvalidSyntax("must be utf8 string?".to_string())
             })?),
             _ => {
@@ -176,7 +122,7 @@ async fn handle_message(message: &Frame) -> Result<Frame, ServerError> {
         };
     }
 
-    if command.len() < 1 {
+    if command.is_empty() {
         return Err(ServerError::CommandInvalidSyntax(
             "missing command name".to_string(),
         ));

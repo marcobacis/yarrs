@@ -217,8 +217,8 @@ impl Message<Frame, FrameParsingError> for Frame {
             Frame::Verbatim(enc, s) => {
                 let bytes = s.as_bytes();
                 let enc = match enc {
-                    VerbatimEncoding::Text => &[b't', b'x', b't'],
-                    VerbatimEncoding::Markdown => &[b'm', b'k', b'd'],
+                    VerbatimEncoding::Text => b"txt",
+                    VerbatimEncoding::Markdown => b"mkd",
                     VerbatimEncoding::Other(value) => value,
                 };
                 buf.push(VERBATIM_PREFIX);
