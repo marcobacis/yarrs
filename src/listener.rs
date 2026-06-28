@@ -51,6 +51,7 @@ async fn handle_connection(socket: &mut TcpStream, sender: mpsc::Sender<Connecti
                 if let Err(e) = sender.send(ConnectionMessage::ClientRequest(Request {
                     client_id: id,
                     frame,
+                    connection: connection_sender.clone()
                 })).await {
                     eprintln!("Error sending request: {}", e);
                     return;

@@ -15,7 +15,7 @@ async fn test_ping() {
         .await
         .expect("Error sending ping command");
 
-    assert_eq!(result, Value::SimpleString("PONG".into()));
+    assert_eq!(result, Value::BulkString("PONG".into()));
 }
 
 #[tokio::test]
@@ -29,7 +29,7 @@ async fn test_echo() {
         .await
         .expect("Error sending echo command");
 
-    assert_eq!(result, Value::SimpleString("test string".into()));
+    assert_eq!(result, Value::BulkString("test string".into()));
 }
 
 async fn spawn() -> MultiplexedConnection {

@@ -1,5 +1,8 @@
 use std::{
-    array::TryFromSliceError, num::{ParseFloatError, ParseIntError}, str::Utf8Error, string::FromUtf8Error
+    array::TryFromSliceError,
+    num::{ParseFloatError, ParseIntError},
+    str::Utf8Error,
+    string::FromUtf8Error,
 };
 
 use anyhow::anyhow;

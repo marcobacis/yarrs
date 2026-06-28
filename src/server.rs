@@ -4,11 +4,12 @@ use thiserror::Error;
 use tokio::{select, sync::mpsc};
 
 use crate::{
+    command::{echo, ping},
     messages::{
         ConnectionMessage::{self},
-        ServerMessage,
+        Request, ServerMessage,
     },
-    resp::{error::FrameParsingError, types::Frame},
+    resp::types::Frame,
 };
 
 pub struct Client {
@@ -35,16 +36,14 @@ pub struct Server {
     client_id: AtomicU64,
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum ServerError {
     #[error("Invalid command syntax: {0}")]
     CommandInvalidSyntax(String),
     #[error("Command \"{0}\" not available")]
     CommandNotAvailable(String),
-    #[error("Invalid data")]
-    InvalidSocketData(#[from] FrameParsingError),
     #[error("Generic IO error")]
-    ServerIoError(#[from] std::io::Error),
+    ServerIoError,
 }
 
 impl Server {
@@ -77,70 +76,53 @@ impl Server {
                             self.clients.insert(new_id, client);
                         },
                         ConnectionMessage::ClientRequest(request) => {
-                            let id = request.client_id;
-                            if let Some(client)  = self.clients.get(&id) {
-                                match handle_message(&request.frame).await {
-                                    Ok(response) => {
-                                        if let Err(e) = client.sender.send(ServerMessage::Data(response)).await {
-                                            eprintln!("Error sending response to client listener: {e}");
-                                        }
-                                    },
-                                    Err(e) => {
-                                        eprintln!("Error handling message : {}", e);
-                                    },
-                                };
-                            }
+                            if let Err(e) = self.handle_message(&request).await {
+                                eprintln!("Error handling message : {}", e);
+                            };
                         },
                     }
                 }
             }
         }
     }
-}
 
-async fn handle_message(message: &Frame) -> Result<Frame, ServerError> {
-    let elements = match message {
-        Frame::Array(frames) => frames,
-        _ => {
-            return Err(ServerError::CommandInvalidSyntax(
-                "shold be RESP array of bulk strings".to_string(),
-            ))
-        }
-    };
-
-    let mut command = Vec::new();
-    for elem in elements {
-        match elem {
-            Frame::Bulk(s) => command.push(String::from_utf8(s.to_vec()).map_err(|_| {
-                ServerError::CommandInvalidSyntax("must be utf8 string?".to_string())
-            })?),
+    async fn handle_message(self: &Self, request: &Request) -> Result<(), ServerError> {
+        let elements = match &request.frame {
+            Frame::Array(frames) => frames,
             _ => {
                 return Err(ServerError::CommandInvalidSyntax(
                     "shold be RESP array of bulk strings".to_string(),
                 ))
             }
         };
-    }
 
-    if command.is_empty() {
-        return Err(ServerError::CommandInvalidSyntax(
-            "missing command name".to_string(),
-        ));
-    }
-
-    let command_name = command[0].to_lowercase();
-
-    match command_name.as_str() {
-        "echo" => {
-            if command.len() < 2 {
-                Err(ServerError::CommandInvalidSyntax(
-                    "missing argument".to_string(),
-                ))
-            } else {
-                Ok(Frame::Simple(command[1].clone()))
-            }
+        let mut command = Vec::new();
+        for elem in elements {
+            match elem {
+                Frame::Bulk(s) => command.push(String::from_utf8(s.to_vec()).map_err(|_| {
+                    ServerError::CommandInvalidSyntax("must be utf8 string?".to_string())
+                })?),
+                _ => {
+                    return Err(ServerError::CommandInvalidSyntax(
+                        "shold be RESP array of bulk strings".to_string(),
+                    ))
+                }
+            };
         }
-        "ping" => Ok(Frame::Simple("PONG".into())),
-        cmd => Err(ServerError::CommandNotAvailable(cmd.to_string())),
+
+        if command.is_empty() {
+            return Err(ServerError::CommandInvalidSyntax(
+                "missing command name".to_string(),
+            ));
+        }
+
+        let command_name = command[0].to_lowercase();
+
+        match command_name.as_str() {
+            "echo" => echo::command(self, &request, &command).await,
+            "ping" => ping::command(self, &request, &command).await,
+            _ => return Err(ServerError::CommandNotAvailable(command_name)),
+        };
+        Ok(())
     }
 }
